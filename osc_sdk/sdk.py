@@ -14,6 +14,7 @@ import requests
 import xmltodict
 import os
 import stat
+import getpass
 
 CANONICAL_URI = '/'
 CONFIGURATION_FILE = 'config.json'
@@ -117,9 +118,10 @@ class ApiCall(object):
     SIG_ALGORITHM = 'AWS4-HMAC-SHA256'
     SIG_TYPE = 'AWS4'
 
-    def __init__(self, profile=DEFAULT_PROFILE, login=None, password=None, authentication_method=DEFAULT_AUTHENTICATION_METHOD, ephemeral_ak_duration=DEFAULT_EPHEMERAL_AK_DURATION_S):
+    def __init__(self, profile=DEFAULT_PROFILE, login=None, password=None, authentication_method=DEFAULT_AUTHENTICATION_METHOD, ephemeral_ak_duration=DEFAULT_EPHEMERAL_AK_DURATION_S ,interactive=False):
         self.setup_profile_options(profile)
-        self.setup_cmd_options(login, password, authentication_method, ephemeral_ak_duration)
+        self.setup_cmd_options(login, password, authentication_method, ephemeral_ak_duration, interactive)
+        self.setup_interactive_options()
         self.check_options()
         self.init_ephemeral_auth()
 
@@ -147,11 +149,40 @@ class ApiCall(object):
         self.date = None
         self.datestamp = None
 
-    def setup_cmd_options(self, login, password, authentication_method, ephemeral_ak_duration):
+    def setup_cmd_options(self, login, password, authentication_method, ephemeral_ak_duration, interactive):
         self.login = login
         self.password = password
         self.authentication_method = authentication_method
         self.ephemeral_ak_duration = ephemeral_ak_duration
+        self.interactive = interactive
+
+    def setup_interactive_options(self):
+        if not self.interactive:
+            return
+        if self.authentication_method == 'password':
+            if self.login == None:
+                self.login = self.user_input_interactive('Login: ')
+            if self.password == None:
+                self.password = self.user_input_interactive_secure('Password: ')
+        if self.authentication_method == 'accesskey':
+            if self.access_key == None:
+                self.access_key = self.user_input_interactive('Access Key: ')
+            if self.secret_key == None:
+                self.secret_key = self.user_input_interactive_secure('Secret Key: ')
+
+    def user_input_interactive(self, prompt=''):
+        # avoid input (W1632)
+        print(prompt, end='', flush=True)
+        r = sys.stdin.readline().splitlines()[0]
+        if len(r) == 0:
+            return None
+        return r
+
+    def user_input_interactive_secure(self, prompt=''):
+        secret = getpass.getpass(prompt=prompt)
+        if len(secret) == 0:
+            return None
+        return secret
 
     def check_options(self):
         if self.authentication_method not in ['accesskey', 'password', 'ephemeral']:
@@ -724,7 +755,7 @@ def get_conf(profile):
         raise RuntimeError('Profile {} not found in configuration file'.format(profile))
 
 
-def api_connect(service, call, profile=DEFAULT_PROFILE, login=None, password=None, authentication_method=DEFAULT_AUTHENTICATION_METHOD, ephemeral_ak_duration=DEFAULT_EPHEMERAL_AK_DURATION_S, *args, **kwargs):
+def api_connect(service, call, profile=DEFAULT_PROFILE, login=None, password=None, authentication_method=DEFAULT_AUTHENTICATION_METHOD, ephemeral_ak_duration=DEFAULT_EPHEMERAL_AK_DURATION_S, interactive=False, *args, **kwargs):
     calls = {
         'api': OSCCall,
         'directlink': DirectLinkCall,
@@ -734,7 +765,7 @@ def api_connect(service, call, profile=DEFAULT_PROFILE, login=None, password=Non
         'lbu': LbuCall,
         'okms': OKMSCall,
     }
-    handler = calls[service](profile, login, password, authentication_method, ephemeral_ak_duration)
+    handler = calls[service](profile, login, password, authentication_method, ephemeral_ak_duration, interactive)
     handler.make_request(call, *args, **kwargs)
     if handler.response:
         print(json.dumps(handler.response, indent=4))
